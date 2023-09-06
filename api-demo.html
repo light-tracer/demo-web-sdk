@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>LT API demo</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+  <style>
+    body { margin: 0; overflow: hidden; background: #40515f; }
+    canvas { touch-action: none; width: 100%; height: 100%; }
+  </style>
+</head>
+  <body>
+    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+
+    <script src="tweakpane/tweakpane.min.js"></script>
+    <script src="tweakpane/tweakpane-plugin-essentials-0.1.8.min.js"></script>
+
+    <script type="module">
+
+      import { default as LightTracerApi } from "./ltapi.js";
+      
+      import * as THREE from './three/three.module.js';
+      import { OrbitControls } from './three/OrbitControls.js';
+      import { TransformControls } from './three/TransformControls.js';
+      import { GLTFExporter } from './three/GLTFExporter.js';
+      import { EXRLoader } from './three/EXRLoader.js';
+
+      class App {
+
+        createBuffer(typedarray) {
+          console.assert(typedarray.buffer instanceof ArrayBuffer);
+          console.assert(typedarray.byteLength > 0);
+          if (this.api.HEAPU32.buffer == typedarray.buffer) {
+              typedarray = new Uint8Array(typedarray);
+          }
+          const ta = typedarray;
+          const bd = new this.api.internal$BufferDescriptor(ta.byteLength);
+          const uint8array = new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength);
+          bd.getBytes().set(uint8array);
+          return bd;
+        }
+
+        constructor(canvasSelector, api) {
+          this.canvas = document.querySelector(canvasSelector);
+          this.api = api;
+          this.cameraFOV = 60;
+          this.useLT = false;
+
+          this.ui = new Tweakpane.Pane();
+          this.ui.registerPlugin(TweakpaneEssentialsPlugin);
+
+          this.params = {
+            modelColor:  {r: 1.0, g: 1.0, b: 1.0},
+            roughness: 0.0,
+            position: {x: 0, y: 0, z: 0},
+          };
+
+          this.fpsGraph = this.ui.addBlade({
+            view: 'fpsgraph',
+
+            label: 'FPS',
+            lineCount: 2,
+          });
+
+          this.ui.addButton({
+            title: 'Enable LT',
+          }).on('click', () => {
+            this.useLT = !this.useLT;
+          });
+
+          const checkError = (status) => {
+            if (status.value != this.api.ErrorType.SUCCESS.value) {
+              console.log(status);
+              console.log("ERROR");
+            }
+          };
+
+          const checkValid = (obj) => {
+            if (obj.id == 0) {
+              console.log("ERROR INVALID HANDLE");
+            }
+          };
+
+          const traverseSceneLT = (node, callback) => {
+
+            for (let subIdx = 0; subIdx < this.api.GetSubNodeCount(this.ctx, node); ++subIdx) {
+              let sub = this.api.GetSubNode(this.ctx, node, subIdx);
+              checkValid(sub);
+
+              callback(sub);
+
+              traverseSceneLT(sub, callback);
+            }
+          };
+
+          this.ui.addInput(this.params, 'modelColor', {
+            color: {type: 'float'},
+          }).on('change', () => {
+            const color = this.params.modelColor;
+
+            // lt
+            {
+              traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+                if (this.api.GetNodeName(this.ctx, node) == "Torus") {
+                  checkError(this.api.SetNodeMaterialColor(this.ctx, node, this.api.MaterialPropertyColor.BASE_COLOR, [color.r, color.g, color.b]));
+                }
+              });
+              this.spp = 0;
+            }
+
+            // three.js
+            this.threeScene.traverse((object) => {
+              if (object.name == "Torus") {
+                object.material.color.set(color.r, color.g, color.b);
+                return;
+              }
+            });
+          });
+
+          this.ui.addInput(this.params, 'roughness', { min: 0.0, max: 1.0}).on('change', () => {
+            const roughness = this.params.roughness;
+
+            // lt
+            {
+              traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+                if (this.api.GetNodeName(this.ctx, node) == "Torus") {
+                  checkError(this.api.SetNodeMaterialValue(this.ctx, node, this.api.MaterialProperty.ROUGHNESS, roughness));
+                }
+              });
+              this.spp = 0;
+            }
+
+            // three.js
+            this.threeScene.traverse((object) => {
+              if (object.name == "Torus") {
+                object.material.roughness = roughness;
+                return;
+              }
+            });
+          });
+
+          this.ui.addButton({
+            title: 'Load texture',
+          }).on('click', () => {
+
+            // lt
+            {
+              traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+                if (this.api.GetNodeName(this.ctx, node) == "Torus") {
+                  fetch('uv_grid_opengl.jpg').then(function(response) {
+                    if (!response.ok) {
+                      throw new Error(name);
+                    }
+                    return response.arrayBuffer();
+                  }).then((arrayBuffer) => {
+                    const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+                    const texture = this.renderer.loadTextureFromBuffer("texture_uid", buffer);
+                    buffer.delete();
+
+                    checkError(this.api.SetNodeTexture(this.ctx, node, texture, this.api.TextureRole.BASE_COLOR_TEXTURE));
+                  });
+                }
+              });
+              this.spp = 0;
+            }
+
+            // three.js
+            this.threeScene.traverse((object) => {
+              if (object.name == "Torus") {
+                const loader = new THREE.TextureLoader();
+                loader.load ('uv_grid_opengl.jpg', (texture) => {
+                  object.material.map = texture;
+                  object.material.needsUpdate = true;
+                });
+                return;
+              }
+            });
+
+          });
+
+          this.ui.addInput(this.params, 'position', {
+            
+          }).on('change', () => {
+            const newPos = this.params.position;
+
+            // lt
+            {
+              traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+                if (this.api.GetNodeName(this.ctx, node) == "New mesh") {
+                  const m = new THREE.Matrix4();
+                  m.makeTranslation(newPos.x, newPos.y, newPos.z);
+                  checkError(this.api.SetNodeLocalTransform(this.ctx, node, m.elements));
+                }
+              });
+              this.spp = 0;
+            }
+
+            // three.js
+            this.threeScene.traverse((object) => {
+              if (object.name == "New mesh") {
+                object.position.set(newPos.x, newPos.y, newPos.z);
+                return;
+              }
+            });
+          });
+
+          this.ui.addButton({
+            title: 'Add mesh',
+          }).on('click', () => {
+            let exists = false;
+
+            this.threeScene.traverse((object) => {
+              if (object.name == "New mesh") {
+                exists = true;
+              }
+            });
+
+            if (exists) {
+              return;
+            }
+
+            let geometry = new THREE.SphereGeometry( 20, 64, 64 );
+            let material = new THREE.MeshStandardMaterial( {
+              color: 0xffaaff,
+              metalness: 1.0,
+              roughness: 0.1,
+              envMap: this.envMap
+            } );
+
+            let mesh = new THREE.Mesh( geometry, material );
+            mesh.name = "New mesh";
+            this.threeScene.add( mesh );
+
+            this.exportToGLB( mesh, (buffer) => {
+              const ltBuffer = this.createBuffer(new Uint8Array(buffer));
+              const newNodeHandle = this.renderer.loadSceneFromBuffer(ltBuffer);
+              ltBuffer.delete();
+
+              console.log("New object bounds", this.api.GetNodeWorldBounds(this.ctx, newNodeHandle));
+              console.log("New object name", this.api.GetNodeName(this.ctx, newNodeHandle));
+
+              // Set name to any node if needed
+              // this.api.SetNodeName(this.ctx, newNodeHandle, "New mesh");
+            });
+          });
+
+          this.progressBar = document.querySelector("#renderProgressBar");
+
+          console.log("LT viewer version: " + this.api.Version());
+
+          let gl = this.gl = this.canvas.getContext('webgl2');
+
+          // Request extensions
+          let floatLinearExt = gl.getExtension('OES_texture_float_linear');
+          gl.getExtension('EXT_color_buffer_float');
+
+          this.renderer = new this.api.Renderer(canvasSelector);
+          this.renderer.setFloatTextureInterpolationSupport(floatLinearExt !== null);
+
+          this.spp = 0;
+          this.justLoadedScene = false;
+          this.readyToRender = false;
+
+          this.ctx = this.renderer.getContextHandle();
+
+          this.api.SetParam(this.ctx, "Exposure", 1.1); // roughly match three.js
+
+          // Must be created after Renderer constructor
+          this.threeRenderer = new THREE.WebGLRenderer({ canvas: canvas });
+          this.threeRenderer.useLegacyLights = false;
+          this.threeRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+          this.setupScene(this.canvas);
+
+          this.view = this.renderer.createView();
+          this.resize();
+
+          this.render = this.render.bind(this);
+          this.resize = this.resize.bind(this);
+
+          window.addEventListener('resize', this.resize);
+          window.requestAnimationFrame(this.render);
+        }
+
+        save( blob, filename ) {
+
+          const link = document.createElement( 'a' );
+
+          link.href = URL.createObjectURL( blob );
+          link.download = filename || 'data.json';
+          link.dispatchEvent( new MouseEvent( 'click' ) );
+
+        }
+
+        saveArrayBuffer( buffer, filename ) {
+
+          this.save( new Blob( [ buffer ], { type: 'application/octet-stream' } ), filename );
+        }
+
+        exportToGLB( input, callback ) {
+
+          new GLTFExporter().parse(
+            input,
+            ( result ) => callback (result),
+            function ( error ) { console.log( 'An error happened during parsing', error ); },
+            { binary: true }
+          );
+
+        }
+
+        setupScene(canvas) {
+
+          const scene = this.threeScene = new THREE.Scene();
+          const camera = this.camera = new THREE.PerspectiveCamera( this.cameraFOV, window.innerWidth / window.innerHeight, 0.1, 10000 );
+          this.cameraPrevMatrix = [...this.camera.matrix.elements];
+
+          camera.position.set( 0, 0, 120 );
+
+          const renderer = this.threeRenderer;
+
+          let geometry = new THREE.TorusKnotGeometry( 18, 7, 300, 40 );
+          let material = new THREE.MeshStandardMaterial( {
+            color: 0xffffff,
+            metalness: 0.0,
+            roughness: 0.0
+          } );
+
+          let torusMesh = new THREE.Mesh( geometry, material );
+          torusMesh.name = "Torus";
+          scene.add( torusMesh );
+
+          const pmremGenerator = new THREE.PMREMGenerator( renderer );
+          pmremGenerator.compileEquirectangularShader();
+
+          new EXRLoader().load( 'piz_compressed.exr', ( texture ) => {
+
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+
+            this.envMap = pmremGenerator.fromEquirectangular( texture ).texture;
+            torusMesh.material.envMap = this.envMap;
+            torusMesh.material.needsUpdate = true;
+            scene.background = texture;
+
+          } );
+
+          this.exportToGLB( torusMesh, (buffer) => {
+            const sceneDataBuffer = this.createBuffer(new Uint8Array(buffer));
+
+            this.renderer.loadSceneFromBuffer(sceneDataBuffer);
+            sceneDataBuffer.delete();
+          });
+
+          // Load env map to LT
+          fetch('piz_compressed.exr').then(function(response) {
+            if (!response.ok) {
+              throw new Error(name);
+            }
+            return response.arrayBuffer();
+          }).then((arrayBuffer) => {
+
+            const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+            this.renderer.loadEnvironmentMapFromBuffer(buffer);
+            buffer.delete();
+          });
+
+          const controls = this.cameraControls = new OrbitControls(camera, renderer.domElement);
+        }
+
+        resize() {
+          const canvas = this.canvas;
+          const dpr = 1.0;//window.devicePixelRatio; TODO
+          const width = canvas.width = window.innerWidth * dpr;
+          const height = canvas.height = window.innerHeight * dpr;
+
+
+          this.camera.aspect = width / height;
+          this.camera.updateProjectionMatrix();
+          this.threeRenderer.setSize(width, height);
+
+          this.view.setViewport([0, 0, width, height]);
+        }
+
+        render() {
+
+          function arrayEquals(a, b) {
+            return Array.isArray(a) &&
+                  Array.isArray(b) &&
+                  a.length === b.length &&
+                  a.every((val, index) => Math.abs(val - b[index]) < 1e-5);
+          }
+
+          this.fpsGraph.begin();
+
+          this.cameraControls.update();
+          this.camera.updateMatrix();
+
+
+          if (this.useLT) {
+
+            this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, 0);
+            this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+
+            if (!arrayEquals(this.cameraPrevMatrix, this.camera.matrix.elements)) {
+              this.spp = 0;
+              this.cameraPrevMatrix = [...this.camera.matrix.elements];
+            }
+
+            const targetSpp = this.renderer.getTargetSpp();
+            if (this.spp < targetSpp) {
+
+              const viewMatrix = new THREE.Matrix4().set(...this.cameraPrevMatrix).transpose().invert();
+              const projMatrix = this.camera.projectionMatrix;
+
+              this.view.setCameraMatrices(viewMatrix.elements, projMatrix.elements);
+
+              this.spp += 1;
+              this.renderer.draw(this.view);
+
+              // console.log(this.spp + " / " + targetSpp + " (" + (this.spp / targetSpp * 100.0) + '%)'); 
+            }
+          }
+          else { // this.useLT
+
+            this.threeRenderer.resetState();
+            this.threeRenderer.render(this.threeScene, this.camera);
+          }
+
+          this.fpsGraph.end();
+
+          window.requestAnimationFrame(this.render);
+        }
+      }
+
+      const gl = document.getElementById('canvas').getContext('webgl2');
+      if (!gl) {
+        console.log('Your browser does not support WebGL2');
+
+        let e = document.querySelector(".lds-ring");
+        e.parentNode.removeChild(e);
+
+        let label = document.querySelector(".loader-label");
+        label.innerText = "Your browser does not support WebGL2";
+
+      } else {
+        LightTracerApi().then( ( api ) => {
+
+          window.app = new App ("#canvas", api);
+
+        });
+      }
+    </script>
+  </body>
+</html>

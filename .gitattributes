@@ -1,0 +1,25 @@
+.gitattributes eol=lf
+.gitignore  eol=lf
+*.txt       eol=lf
+*.js        eol=lf
+*.ts        eol=lf
+*.html      eol=lf
+
+*.dll       binary
+*.so        binary
+*.dylib     binary
+*.7z        binary
+*.pdf       binary
+*.png       binary
+*.jpg       binary
+*.bmp       binary
+*.gif       binary
+*.exr       binary
+*.ico       binary
+*.wasm      binary
+*.hdr       binary
+*.gz        binary
+*.doc       binary
+*.rgb       binary
+*.mft       binary
+*.zip       binary
