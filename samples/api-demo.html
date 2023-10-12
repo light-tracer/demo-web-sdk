@@ -12,18 +12,18 @@
   <body>
     <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
 
-    <script src="tweakpane/tweakpane.min.js"></script>
-    <script src="tweakpane/tweakpane-plugin-essentials-0.1.8.min.js"></script>
+    <script src="/tweakpane/tweakpane.min.js"></script>
+    <script src="/tweakpane/tweakpane-plugin-essentials-0.1.8.min.js"></script>
 
     <script type="module">
 
-      import { default as LightTracerApi } from "./ltapi.js";
+      import { default as LightTracerApi } from "/ltapi.js";
       
-      import * as THREE from './three/three.module.js';
-      import { OrbitControls } from './three/OrbitControls.js';
-      import { TransformControls } from './three/TransformControls.js';
-      import { GLTFExporter } from './three/GLTFExporter.js';
-      import { EXRLoader } from './three/EXRLoader.js';
+      import * as THREE from '/three/three.module.js';
+      import { OrbitControls } from '/three/OrbitControls.js';
+      import { TransformControls } from '/three/TransformControls.js';
+      import { GLTFExporter } from '/three/GLTFExporter.js';
+      import { EXRLoader } from '/three/EXRLoader.js';
 
       class App {
 
@@ -147,7 +147,7 @@
             {
               traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
                 if (this.api.GetNodeName(this.ctx, node) == "Torus") {
-                  fetch('uv_grid_opengl.jpg').then(function(response) {
+                  fetch('/resources/uv_grid_opengl.jpg').then(function(response) {
                     if (!response.ok) {
                       throw new Error(name);
                     }
@@ -168,7 +168,7 @@
             this.threeScene.traverse((object) => {
               if (object.name == "Torus") {
                 const loader = new THREE.TextureLoader();
-                loader.load ('uv_grid_opengl.jpg', (texture) => {
+                loader.load ('/resources/uv_grid_opengl.jpg', (texture) => {
                   object.material.map = texture;
                   object.material.needsUpdate = true;
                 });
@@ -244,6 +244,29 @@
             });
           });
 
+
+          this.ui.addButton({
+            title: 'Delete node',
+          }).on('click', () => {
+            // lt
+            {
+              traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+                if (this.api.GetNodeName(this.ctx, node) == "New mesh") {
+                  checkError(this.api.DeleteNode(this.ctx, node));
+                }
+              });
+              this.spp = 0;
+            }
+
+            // three.js
+            this.threeScene.traverse((object) => {
+              if (object.name == "New mesh") {
+                this.threeScene.remove( object );
+                return;
+              }
+            });
+          });
+
           this.progressBar = document.querySelector("#renderProgressBar");
 
           console.log("LT viewer version: " + this.api.Version());
@@ -254,7 +277,7 @@
           let floatLinearExt = gl.getExtension('OES_texture_float_linear');
           gl.getExtension('EXT_color_buffer_float');
 
-          this.renderer = new this.api.Renderer(canvasSelector);
+          this.renderer = new this.api.Renderer(canvasSelector, "LT_APP_TOKEN");
           this.renderer.setFloatTextureInterpolationSupport(floatLinearExt !== null);
 
           this.spp = 0;
@@ -332,7 +355,7 @@
           const pmremGenerator = new THREE.PMREMGenerator( renderer );
           pmremGenerator.compileEquirectangularShader();
 
-          new EXRLoader().load( 'piz_compressed.exr', ( texture ) => {
+          new EXRLoader().load( '/resources/piz_compressed.exr', ( texture ) => {
 
             texture.mapping = THREE.EquirectangularReflectionMapping;
 
@@ -351,7 +374,7 @@
           });
 
           // Load env map to LT
-          fetch('piz_compressed.exr').then(function(response) {
+          fetch('/resources/piz_compressed.exr').then(function(response) {
             if (!response.ok) {
               throw new Error(name);
             }
@@ -405,7 +428,7 @@
               this.cameraPrevMatrix = [...this.camera.matrix.elements];
             }
 
-            const targetSpp = this.renderer.getTargetSpp();
+            const targetSpp = 512;
             if (this.spp < targetSpp) {
 
               const viewMatrix = new THREE.Matrix4().set(...this.cameraPrevMatrix).transpose().invert();
