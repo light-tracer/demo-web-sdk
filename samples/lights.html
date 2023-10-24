@@ -150,6 +150,61 @@
             });
           });
 
+          this.ui.addButton({
+            title: 'Add IES light',
+          }).on('click', () => {
+            let exists = false;
+            traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+              if (this.api.GetNodeName(this.ctx, node) == "IES light") {
+                exists = true;
+              }
+            });
+
+            if (exists) {
+              return;
+            }
+
+            let geometry = new THREE.CircleGeometry( 5, 32 );
+            let mesh = new THREE.Mesh( geometry );
+            mesh.name = "IES light";
+
+            this.exportToGLB( mesh, (buffer) => {
+              const ltBuffer = this.createBuffer(new Uint8Array(buffer));
+              this.renderer.loadSceneFromBuffer(ltBuffer);
+              ltBuffer.delete();
+              this.spp = 0;
+
+              traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+                if (this.api.GetNodeName(this.ctx, node) == "IES light") {
+                  const m = new THREE.Matrix4();
+                  m.makeRotationX(Math.PI / 2.0);
+                  m.setPosition(0, 60, 0);
+                  this.api.SetNodeLocalTransform(this.ctx, node, m.elements);
+                  this.api.SetNodeMaterialColor(this.ctx, node, this.api.MaterialPropertyColor.BASE_COLOR, [0, 0, 0]);
+                  this.api.SetNodeMaterialColor(this.ctx, node, this.api.MaterialPropertyColor.EMISSION_COLOR, [1.0, 0.4, 0.1]);
+                  this.api.SetNodeMaterialValue(this.ctx, node, this.api.MaterialProperty.EMISSION_POWER, 100.0);
+
+                  // Set IES profile
+                  fetch('/resources/tight-focused.ies').then(function(response) {
+                    if (!response.ok) {
+                      throw new Error(name);
+                    }
+                    return response.arrayBuffer();
+                  }).then((arrayBuffer) => {
+
+                    this.spp = 0;
+
+                    const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+                    const texture = this.renderer.loadIesProfileFromBuffer("texture_uid", buffer);
+                    buffer.delete();
+
+                    this.api.SetNodeTexture(this.ctx, node, texture, this.api.TextureRole.IES_PROFILE_TEXTURE);
+                  });
+                }
+              });
+            });
+          });
+
           console.log("LT viewer version: " + this.api.Version());
 
           let gl = this.gl = this.canvas.getContext('webgl2');

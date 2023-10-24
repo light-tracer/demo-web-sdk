@@ -1,26 +1,39 @@
 class ErrorType {
-	SUCCESS : number = 0;
-	INTERRUPT : number = 1;
-	NO_DATA : number = 2;
-	ERROR : number = 3;
-	ERROR_IO : number = 4;
-	ERROR_HANDLE_INVALID : number = 5;
-	ERROR_NO_MEMORY : number = 6;
-	ERROR_PROPERTY_NOT_FOUND : number = 7;
+  SUCCESS : number = 0;
+  INTERRUPT : number = 1;
+  NO_DATA : number = 2;
+  ERROR : number = 3;
+  ERROR_IO : number = 4;
+  ERROR_HANDLE_INVALID : number = 5;
+  ERROR_NO_MEMORY : number = 6;
+  ERROR_PROPERTY_NOT_FOUND : number = 7;
 }
 
 class VisibilityMode {
-	HIDDEN : number = 0;
-	CAMERA_HIDDEN : number = 1;
-	FULLY_VISIBLE : number = 2;
+  HIDDEN : number = 0;
+  CAMERA_HIDDEN : number = 1;
+  FULLY_VISIBLE : number = 2;
+}
+
+class BackplateType {
+  ENVIRONMENT : number = 0;
+  SOLID_COLOR : number = 1;
+  // IMAGE : number = 2;         // Not exposed yet
+  TRANSPARENT : number = 3;
+}
+
+class MaterialType {
+  STANDARD_PBR : number = 0;     // Physically based material, using metallic-roughness workflow
+  GLASS_MATERIAL : number = 2;   // Glass material allowing refraction, roughness and light dispersion
+  SHADOW_CATCHER : number = 3;   // Dedicated material type for shadow/glossy catcher
 }
 
 class MaterialPropertyColor {
-	BASE_COLOR : number = 0;       // Base color of the surface
-	COATING_COLOR : number = 1;    // Absorption of the coating
-	EMISSION_COLOR : number = 2;   // Color of the emitted radiance
-	ABSORPTION_COLOR : number = 3; // Residual absorption color
-	GLASS_COLOR : number = 4;      // Color to modulate reflection/refraction
+  BASE_COLOR : number = 0;       // Base color of the surface
+  COATING_COLOR : number = 1;    // Absorption of the coating
+  EMISSION_COLOR : number = 2;   // Color of the emitted radiance
+  ABSORPTION_COLOR : number = 3; // Residual absorption color
+  GLASS_COLOR : number = 4;      // Color to modulate reflection/refraction
 }
 
 class MaterialProperty {
@@ -231,6 +244,64 @@ declare class ApiObject {
   
   //! Returns clip name.
   GetClipName: (context: ContextType, clip: ClipType) => string;
+
+  //! Moves object to a new parent (and removes from old one).
+  AssignNodeToParent: (context: ContextType, node: NodeType newParent: NodeType) => ErrorType;
+
+  //! Makes shallow copy of the node which will share geometry and material data with the original.
+  //! Moves it to a given parent node.
+  CloneNode: (context: ContextType, node: NodeType newParent: NodeType) => ErrorType;
+
+  //! Makes copy of entire node tree by cloning all nested nodes recursively.
+  CloneNodeHierarchy: (context: ContextType, node: NodeType newParent: NodeType) => ErrorType;
+
+  //! Creates new empty inner node without material and mesh.
+  MakeNode: (context: ContextType, name: string, parent_node: NodeType) => NodeType;
+
+  //! Sets material property.
+  SetMaterialValue: (context: ContextType, material: MaterialDescriptor, property: MaterialProperty, value: number) => ErrorType;
+
+  //! Returns material property.
+  GetMaterialValue: (context: ContextType, material: MaterialDescriptor, property: MaterialProperty) => number;
+
+  //! Sets material color.
+  SetMaterialColor: (context: ContextType, material: MaterialDescriptor, property: MaterialPropertyColor, color: number[]) => ErrorType;
+
+  //! Returns material color.
+  GetMaterialColor: (context: ContextType, material: MaterialDescriptor, property: MaterialPropertyColor) => Vec3;
+
+  //! Sets texture with a given role for material.
+  SetMaterialTexture: (context: ContextType, material: MaterialDescriptor, texture: TextureType, role: TextureRole) => ErrorType;
+
+  //! Returns material descriptor associated with the node.
+  GetNodeMaterial: (context: ContextType, node: NodeType) => MaterialDescriptor;
+
+  //! Assign material to the node.
+  SetNodeMaterial: (context: ContextType, node: NodeType, material: MaterialDescriptor) => ErrorType;
+
+  //! Creates new material.
+  MakeMaterial: (context: ContextType) => MaterialDescriptor;
+
+  //! Sets material type.
+  SetMaterialType: (context: ContextType, material: MaterialDescriptor, type: MaterialType) => ErrorType;
+
+  //! Returns material type.
+  GetMaterialType: (context: ContextType, material: MaterialDescriptor) => MaterialType;
+
+  //! Sets node material type.
+  SetNodeMaterialType: (context: ContextType, node: NodeType, type: MaterialType) => ErrorType;
+
+  //! Returns node material type.
+  GetNodeMaterialType: (context: ContextType, node: NodeType) => MaterialType;
+
+  //! Sets backplate type.
+  SetBackplateType: (context: ContextType, type: BackplateType) => ErrorType;
+
+  //! Returns backplate type.
+  GetBackplateType: (context: ContextType) => BackplateType;
+
+  //! Sets the color for SOLID_COLOR backplate mode.
+  SetBackplateColor: (context: ContextType, color: number[]) => ErrorType;
 }
 
 declare class View {
@@ -252,6 +323,9 @@ declare class Renderer {
 
   //! Decodes the texture provided with a file buffer and returns texture handle.
   loadTextureFromBuffer: (id: string, buffer: BufferDescriptor) => TextureType;
+
+  //! Adds IES profile as a texture to the scene.
+  loadIesProfileFromBuffer: (id: string, buffer: BufferDescriptor) => TextureType;
 
   //! Loads GLTF scene from buffer and returns root node handle.
   loadSceneFromBuffer: (buffer: BufferDescriptor) => NodeType;
