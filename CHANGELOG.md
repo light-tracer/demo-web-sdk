@@ -1,8 +1,15 @@
 ## Updates
 
+#### 06-Nov-2023
+
+- Added API to control materials independently of nodes.
+- Added API to change material type: PBR, Glass, Shadow catcher.
+- Added API to load IES profiles.
+- Added Jewellery configurator sample.
+
 #### 12-Oct-2023
 
-- Added APIs to control animations and light sources.
+- Added API to control animations and light sources.
 - Removed internal 512 SPP limit.
 - Added new samples.
 
