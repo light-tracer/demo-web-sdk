@@ -1,5 +1,15 @@
 ## Updates
 
+#### 28-Nov-2023
+
+- Added camera lens API to control defocus (see jewellery sample).
+- Added API to access rendered image (see api-demo sample).
+- Fixed `AssignNodeToParent` function.
+- Added minimal hello_lt sample that does not rely on three.js (except for camera).
+- Added opacity sample demonstrating setting opacity map for material and setting image backplate.
+- Added `SetEnvironmentLightShape` function to use image based environment lights (see lights demo). 
+- Added API for SkyDome environment mode (see api-demo: Environment group in debug UI).
+
 #### 06-Nov-2023
 
 - Added API to control materials independently of nodes.

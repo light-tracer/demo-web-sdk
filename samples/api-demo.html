@@ -40,6 +40,21 @@
           return bd;
         }
 
+        save( blob, filename ) {
+
+          const link = document.createElement( 'a' );
+
+          link.href = URL.createObjectURL( blob );
+          link.download = filename || 'data.json';
+          link.dispatchEvent( new MouseEvent( 'click' ) );
+
+        }
+
+        saveImage( buffer, filename ) {
+
+          this.save( new Blob( [ buffer ], { type: 'image/png' } ), filename );
+        }
+
         constructor(canvasSelector, api) {
           this.canvas = document.querySelector(canvasSelector);
           this.api = api;
@@ -53,6 +68,8 @@
             modelColor:  {r: 1.0, g: 1.0, b: 1.0},
             roughness: 0.0,
             position: {x: 0, y: 0, z: 0},
+            DomeRadius: 0.0,
+            DomeHeight: 0.0
           };
 
           this.fpsGraph = this.ui.addBlade({
@@ -93,7 +110,9 @@
             }
           };
 
-          this.ui.addInput(this.params, 'modelColor', {
+          const torusFolder = this.ui.addFolder({ title: 'Torus', expanded: true });
+
+          torusFolder.addInput(this.params, 'modelColor', {
             color: {type: 'float'},
           }).on('change', () => {
             const color = this.params.modelColor;
@@ -117,7 +136,7 @@
             });
           });
 
-          this.ui.addInput(this.params, 'roughness', { min: 0.0, max: 1.0}).on('change', () => {
+          torusFolder.addInput(this.params, 'roughness', { min: 0.0, max: 1.0}).on('change', () => {
             const roughness = this.params.roughness;
 
             // lt
@@ -139,7 +158,7 @@
             });
           });
 
-          this.ui.addButton({
+          torusFolder.addButton({
             title: 'Load texture',
           }).on('click', () => {
 
@@ -178,7 +197,9 @@
 
           });
 
-          this.ui.addInput(this.params, 'position', {
+          const addMeshFolder = this.ui.addFolder({ title: 'Add mesh', expanded: true });
+
+          addMeshFolder.addInput(this.params, 'position', {
             
           }).on('change', () => {
             const newPos = this.params.position;
@@ -204,7 +225,7 @@
             });
           });
 
-          this.ui.addButton({
+          addMeshFolder.addButton({
             title: 'Add mesh',
           }).on('click', () => {
             let exists = false;
@@ -244,9 +265,8 @@
             });
           });
 
-
-          this.ui.addButton({
-            title: 'Delete node',
+          addMeshFolder.addButton({
+            title: 'Delete mesh',
           }).on('click', () => {
             // lt
             {
@@ -265,6 +285,93 @@
                 return;
               }
             });
+          });
+
+          const envFolder = this.ui.addFolder({ title: 'Environment', expanded: false });
+
+          envFolder.addButton({
+            title: 'Sky dome',
+          }).on('click', () => {
+            this.skyDome = !this.skyDome;
+
+            this.api.SetParam(this.ctx, 'SkyDomeEnabled', this.skyDome);
+
+            this.params.DomeRadius = this.api.GetParam(this.ctx, 'DomeRadius');
+            this.params.DomeHeight = this.api.GetParam(this.ctx, 'DomeHeight');
+
+            this.ui.refresh();
+          });
+
+          envFolder.addInput(this.params, 'DomeRadius', { min: 0.0, max: 200.0 }).on('change', () => {
+            this.api.SetParam(this.ctx, 'DomeRadius', this.params.DomeRadius);
+          });
+
+          envFolder.addInput(this.params, 'DomeHeight', { min: 0.0, max: 200.0 }).on('change', () => {
+            this.api.SetParam(this.ctx, 'DomeHeight', this.params.DomeHeight);
+          });
+
+          const imageFolder = this.ui.addFolder({ title: 'Image', expanded: true });
+
+          imageFolder.addButton({
+            title: 'Output normals',
+          }).on('click', () => {
+            if (this.outputtingNormals) {
+              this.outputtingNormals = false;
+              this.api.SetOutputPass(this.ctx, this.api.OutputPass.TONEMAPPED);
+            } else {
+              this.outputtingNormals = true;
+              this.api.SetOutputPass(this.ctx, this.api.OutputPass.NORMAL);
+            }
+          });
+
+          imageFolder.addButton({
+            title: 'Save image',
+          }).on('click', () => {
+            const imageBuffer = this.renderer.getImageData(this.view);
+            this.saveImage(imageBuffer.getBytes(), 'render.png');
+          });
+
+          const debugFolder = this.ui.addFolder({ title: 'Debug', expanded: false });
+          debugFolder.addButton({
+            title: 'Draw node tree',
+          }).on('click', () => {
+            this.drawNodeTree();
+          });
+
+          debugFolder.addButton({
+            title: 'Test re-parent',
+          }).on('click', () => {
+
+            let torusNode = null;
+            traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+                if (this.api.GetNodeName(this.ctx, node) == "Torus") {
+                  torusNode = node;
+                }
+            });
+
+            let newMeshNode = null;
+            traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+              if (this.api.GetNodeName(this.ctx, node) == "New mesh") {
+                newMeshNode = node;
+              }
+            });
+
+            if (newMeshNode != null && torusNode != null) {
+              // if we only do this, the ball will disappear
+              this.api.AssignNodeToParent(this.ctx, torusNode, newMeshNode);
+              // that's because newMeshNode is now an inner node and its' not supposed to have a mesh attached
+
+              // to work around that let's clone it and parent the cloned note to newMeshNode
+              let clonedNewMesh = this.api.CloneNode (this.ctx, newMeshNode, {id: 0})
+              this.api.AssignNodeToParent(this.ctx, clonedNewMesh, newMeshNode);
+              // CloneNode shares meshes with old nodes, so it does not really waste resources
+
+              console.log('Attaching torus to new mesh node');
+            }
+            else if (torusNode) {
+              this.api.AssignNodeToParent(this.ctx, torusNode, this.api.GetSceneRootNode(this.ctx));
+              console.log('Moving torus to root');
+            }
           });
 
           this.progressBar = document.querySelector("#renderProgressBar");
@@ -303,21 +410,6 @@
 
           window.addEventListener('resize', this.resize);
           window.requestAnimationFrame(this.render);
-        }
-
-        save( blob, filename ) {
-
-          const link = document.createElement( 'a' );
-
-          link.href = URL.createObjectURL( blob );
-          link.download = filename || 'data.json';
-          link.dispatchEvent( new MouseEvent( 'click' ) );
-
-        }
-
-        saveArrayBuffer( buffer, filename ) {
-
-          this.save( new Blob( [ buffer ], { type: 'application/octet-stream' } ), filename );
         }
 
         exportToGLB( input, callback ) {
@@ -451,6 +543,90 @@
           this.fpsGraph.end();
 
           window.requestAnimationFrame(this.render);
+        }
+
+        drawNodeTree() {
+          if (!this.canvasOverlay) {
+            this.canvasOverlay = document.createElement('canvas');
+            this.canvasOverlay.style.setProperty('width', '100%');
+            this.canvasOverlay.style.setProperty('height', '100%');
+            this.canvasOverlay.style.setProperty('position', 'absolute');
+            this.canvasOverlay.style.setProperty('z-index', '100');
+            document.body.insertAdjacentElement('afterbegin', this.canvasOverlay);
+            this.canvasOverlay.oncontextmenu = () => false;
+            this.canvasOverlay.onclick = () => this.canvasOverlay.style.setProperty('display', 'none');
+          }
+
+          this.canvasOverlay.style.setProperty('display', 'block')
+
+          const canvas = this.canvasOverlay;
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+
+          const ctx = canvas.getContext('2d');
+
+          const getSubtreeHeight = (node) => {
+            if (this.api.GetSubNodeCount(this.ctx, node) === 0) {
+              return 20;
+            }
+
+            let acc = 0;
+
+            if (this.api.GetNodeVisible(this.ctx, node) === this.api.VisibilityMode.FULLY_VISIBLE) {
+              for (let childIdx = 0; childIdx < this.api.GetSubNodeCount(this.ctx, node); ++childIdx) {
+                acc += getSubtreeHeight(this.api.GetSubNode(this.ctx, node, childIdx));
+              }
+            }
+
+            return 20 + acc;
+          };
+
+          if (ctx) {
+            const drawNode = (node, parentNode, parentVisible, xOffset = 0, yOffset = 0) => {
+              const posx = xOffset;
+              const posy = yOffset;
+
+              let name = this.api.GetNodeName(this.ctx, node);
+              let visible = parentVisible;
+
+              visible &&= this.api.GetNodeVisible(this.ctx, node) === this.api.VisibilityMode.FULLY_VISIBLE;
+
+              if (parentNode.id === 0) {
+                visible = true;
+              }
+
+              ctx.fillStyle = visible ? 'white' : 'darkgrey';
+              ctx.fillText(`${name}`, posx, posy);
+
+              if (visible) {
+                let childYOffset = posy + 20;
+
+                for (let childIdx = 0; childIdx < this.api.GetSubNodeCount(this.ctx, node); ++childIdx) {
+                  let child = this.api.GetSubNode(this.ctx, node, childIdx);
+
+                  ctx.beginPath();
+                  ctx.strokeStyle = 'grey';
+                  ctx.moveTo(posx + 5, posy + 10);
+                  ctx.lineTo(posx + 5, childYOffset);
+                  ctx.lineTo(posx + 15, childYOffset);
+                  ctx.stroke();
+
+                  drawNode(child, node, visible, posx + 20, childYOffset);
+
+                  childYOffset += getSubtreeHeight(child);
+                }
+              }
+            };
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "rgb(100 100 100 / 60%)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = 'darkgrey';
+            ctx.fillText('Click anywhere to hide', 10, 20);
+
+            drawNode(this.api.GetSceneRootNode(this.ctx), { id: 0 }, true, 30, 100);
+          }
         }
       }
 
