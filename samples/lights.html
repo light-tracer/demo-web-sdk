@@ -70,6 +70,21 @@
             this.envLight = this.api.AddEnvironmentLight(this.ctx);
             this.api.SetEnvironmentLightDirection(this.ctx, this.envLight, [-1, 0, 0]);
             this.api.SetEnvironmentLightColor(this.ctx, this.envLight, [30.0, 2.0, 1.0]);
+            
+            fetch('/resources/synthetic_soft_round_half.png').then((response) => {
+              if (!response.ok) {
+                throw new Error(name);
+              }
+              return response.arrayBuffer();
+            }).then((arrayBuffer) => {
+              const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+              const texture = this.renderer.loadTextureFromBuffer("texture_uid", buffer);
+              buffer.delete();
+
+              this.api.SetEnvironmentLightShape(this.ctx, this.envLight, texture);
+              this.api.SetEnvironmentLightParam(this.ctx, this.envLight, 'Rotation', 90.0 * (Math.PI / 180.0));
+              this.spp = 0;
+            });
             this.spp = 0;
           });
 

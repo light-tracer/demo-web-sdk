@@ -15,6 +15,12 @@ class VisibilityMode {
   FULLY_VISIBLE : number = 2;
 }
 
+class LensModel {
+  PINHOLE_LENS : number = 0;
+  THIN_LENS : number = 1;
+  PANORAMA_LENS : number = 2;
+}
+
 class BackplateType {
   ENVIRONMENT : number = 0;
   SOLID_COLOR : number = 1;
@@ -122,6 +128,8 @@ class TextureRole
   LIGHT_SHAPE_TEXTURE : number = 8;
 }
 
+class MaterialDescriptor {}
+
 class ContextType {
   id : number;
 }
@@ -148,22 +156,37 @@ declare class ApiObject {
 
   // List of possible parameters:
 
-  // RayOffsetFactor
-  // MaxRadiance
-  // RngCoherency
-  // ToApplyHdrBloom
-  // BloomThreshold
-  // BloomSpreading
-  // BloomSoftening
-  // UseNearestFiltering
-  // ToHideLights
-  // Contrast
-  // ContrastMidpoint
-  // MaxBouncesTotal
-  // MaxBouncesDiffuse
-  // MaxBouncesGlossy
-  // Saturation
-  // Exposure
+  // Bloom:
+    // ToApplyHdrBloom
+    // BloomThreshold
+    // BloomSpreading
+    // BloomSoftening
+
+  // Color:
+    // Contrast
+    // ContrastMidpoint
+    // Saturation
+    // Exposure
+
+  // Camera lens:
+    // FocalLength
+    // LensFNumber
+    // FocusDistance
+    // BladesNumber
+    // SensorHeight
+    // AutoFocusOnCenter
+    // AutoFocalLength
+
+  // Advanced rendering settings:
+    // RayOffsetFactor
+    // MaxRadiance
+    // RngCoherency
+    // UseNearestFiltering
+    // ToHideLights                       -- hides environment lights from camera
+
+    // MaxBouncesTotal
+    // MaxBouncesDiffuse
+    // MaxBouncesGlossy
 
   //! Sets local node transformation matrix.
   //! Final (world) transformation may be affected by parent node.
@@ -203,6 +226,9 @@ declare class ApiObject {
   //! Sets node visibility mode.
   SetNodeVisible: (context: ContextType, node: NodeType, visibilityMode: VisibilityMode) => ErrorType;
 
+  //! Returns node visibility mode.
+  GetNodeVisible: (context: ContextType, node: NodeType) => VisibilityMode;
+
   //! Sets texture with a given role for node material.
   SetNodeTexture: (context: ContextType, node: NodeType, texture: TextureType, role: TextureRole) => ErrorType;
 
@@ -228,11 +254,22 @@ declare class ApiObject {
   SetEnvironmentLightColor: (context: ContextType, light: LightEnvType, color: number[]) => ErrorType;
   
   //! Sets named parameter for given light source.
+  //! List of possible parameters:
+  //    Rotation
+  //    AngularSizeX
+  //    AngularSizeY
+  //    Falloff            -- only for procedural light shapees
+  //    Sides              -- only for procedural light shapees
+  // Note: All angles expected to be in radians.
   SetEnvironmentLightParam: (context: ContextType, light: LightEnvType, name: string, value: number) => ErrorType;
   
   //! Returns named parameter value for given light source.
   GetEnvironmentLightParam: (context: ContextType, light: LightEnvType, name: string) => number;
   
+  //! Sets shape image for the environment light source.
+  //! Pass {id: 0} to texture to set light back to parametric shape. 
+  SetEnvironmentLightShape: (context: ContextType, light: LightEnvType, texture: TextureType) => ErrorType;
+
   //! Returns number of animation clips associated with the node.
   GetNodeClipCount: (context: ContextType, node: NodeType) => number;
   
@@ -246,14 +283,14 @@ declare class ApiObject {
   GetClipName: (context: ContextType, clip: ClipType) => string;
 
   //! Moves object to a new parent (and removes from old one).
-  AssignNodeToParent: (context: ContextType, node: NodeType newParent: NodeType) => ErrorType;
+  AssignNodeToParent: (context: ContextType, node: NodeType, newParent: NodeType) => ErrorType;
 
   //! Makes shallow copy of the node which will share geometry and material data with the original.
   //! Moves it to a given parent node.
-  CloneNode: (context: ContextType, node: NodeType newParent: NodeType) => ErrorType;
+  CloneNode: (context: ContextType, node: NodeType, newParent: NodeType) => ErrorType;
 
   //! Makes copy of entire node tree by cloning all nested nodes recursively.
-  CloneNodeHierarchy: (context: ContextType, node: NodeType newParent: NodeType) => ErrorType;
+  CloneNodeHierarchy: (context: ContextType, node: NodeType, newParent: NodeType) => ErrorType;
 
   //! Creates new empty inner node without material and mesh.
   MakeNode: (context: ContextType, name: string, parent_node: NodeType) => NodeType;
@@ -268,7 +305,7 @@ declare class ApiObject {
   SetMaterialColor: (context: ContextType, material: MaterialDescriptor, property: MaterialPropertyColor, color: number[]) => ErrorType;
 
   //! Returns material color.
-  GetMaterialColor: (context: ContextType, material: MaterialDescriptor, property: MaterialPropertyColor) => Vec3;
+  GetMaterialColor: (context: ContextType, material: MaterialDescriptor, property: MaterialPropertyColor) => number[];
 
   //! Sets texture with a given role for material.
   SetMaterialTexture: (context: ContextType, material: MaterialDescriptor, texture: TextureType, role: TextureRole) => ErrorType;
@@ -302,6 +339,12 @@ declare class ApiObject {
 
   //! Sets the color for SOLID_COLOR backplate mode.
   SetBackplateColor: (context: ContextType, color: number[]) => ErrorType;
+
+  //! Sets lens model used by the camera.
+  SetCameraLensModel: (context: ContextType, lensType: LensModel) => ErrorType;
+
+  //! Returns lens model used by the camera.
+  GetCameraLensModel: (context: ContextType) => LensModel;
 }
 
 declare class View {

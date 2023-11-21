@@ -399,11 +399,14 @@
           api.SetMaterialValue(this.ctx, materials['Gems'].matLt, api.MaterialProperty.GLASS_IOR, 2.42);
           api.SetMaterialValue(this.ctx, materials['Gems'].matLt, api.MaterialProperty.GLASS_DISPERSION, 0.01);
 
+          api.SetCameraLensModel(this.ctx, api.LensModel.THIN_LENS);
+          api.SetParam(this.ctx, 'LensFNumber', 5.0);
+          api.SetParam(this.ctx, 'AutoFocusOnCenter', true);
+
           // TODO: switch to LT rendering when camera is still
           // TODO: blend between three and LT renders
           // TODO: realtime diamonds for three.js
           // TODO: shadow catcher for three.js
-          // TODO: slight DOF
           // TODO: geometry isolation for gems
         }
 

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>LT API demo</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+  <style>
+    body { margin: 0; overflow: hidden; background: #40515f; }
+    canvas { touch-action: none; width: 100%; height: 100%; }
+  </style>
+</head>
+  <body>
+    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+
+    <script type="module">
+
+      import { default as LightTracerApi } from "/ltapi.js";
+      
+      import * as THREE from '/three/three.module.js';
+      import { OrbitControls } from '/three/OrbitControls.js';
+
+      class App {
+
+        createBuffer(typedarray) {
+          console.assert(typedarray.buffer instanceof ArrayBuffer);
+          console.assert(typedarray.byteLength > 0);
+          if (this.api.HEAPU32.buffer == typedarray.buffer) {
+              typedarray = new Uint8Array(typedarray);
+          }
+          const ta = typedarray;
+          const bd = new this.api.internal$BufferDescriptor(ta.byteLength);
+          const uint8array = new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength);
+          bd.getBytes().set(uint8array);
+          return bd;
+        }
+
+        constructor(canvasSelector, api) {
+          this.canvas = document.querySelector(canvasSelector);
+          this.api = api;
+          this.cameraFOV = 20;
+
+          console.log("LT viewer version: " + this.api.Version());
+
+          let gl = this.gl = this.canvas.getContext('webgl2');
+
+          // Request extensions
+          let floatLinearExt = gl.getExtension('OES_texture_float_linear');
+          gl.getExtension('EXT_color_buffer_float');
+
+          this.renderer = new this.api.Renderer(canvasSelector, "LT_APP_TOKEN");
+          this.renderer.setFloatTextureInterpolationSupport(floatLinearExt !== null);
+
+          this.spp = 0;
+          this.justLoadedScene = false;
+          this.readyToRender = false;
+
+          this.ctx = this.renderer.getContextHandle();
+
+          this.api.SetParam(this.ctx, "Exposure", 1.5);
+
+          this.view = this.renderer.createView();
+
+          this.render = this.render.bind(this);
+          this.resize = this.resize.bind(this);
+
+          window.addEventListener('resize', this.resize);
+
+          this.setupScene(this.canvas).then(() => {
+            this.resize();
+            window.requestAnimationFrame(this.render);
+          });
+        }
+
+        async setupScene(canvas) {
+
+          const gltfUrl = '/resources/modern_kitchen.glb';
+          const envmapUrl = '/resources/piz_compressed.exr';
+
+          // Prepare LT
+          const modelPromise = fetch(gltfUrl);
+          const envmapPromise = fetch(envmapUrl);
+          {
+            const response = await modelPromise;
+            if (!response.ok) { throw new Error(); }
+            const arrayBuffer = await response.arrayBuffer();
+
+            const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+            this.modelNode = this.renderer.loadSceneFromBuffer(buffer);
+            buffer.delete();
+          }
+
+          {
+            const response = await envmapPromise;
+            if (!response.ok) { throw new Error(); }
+            const arrayBuffer = await response.arrayBuffer();
+
+            const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+            this.renderer.loadEnvironmentMapFromBuffer(buffer);
+            buffer.delete();
+          }
+
+          // Fit camera to scene
+          const camera = this.camera = new THREE.PerspectiveCamera( this.cameraFOV, window.innerWidth / window.innerHeight, 0.1, 10000 );
+          this.cameraPrevMatrix = [...this.camera.matrix.elements];
+
+          const controls = this.cameraControls = new OrbitControls(camera, this.canvas);
+
+          const bounds = this.api.GetNodeWorldBounds(this.ctx, this.api.GetSceneRootNode(this.ctx));
+
+          const sceneCenter = (new THREE.Vector3).set(bounds.center[0], bounds.center[1], bounds.center[2]);
+          const sceneSize = (new THREE.Vector3).set(bounds.size[0], bounds.size[1], bounds.size[2]);
+
+          const dist = 0.5 * sceneSize.length() / Math.tan(this.cameraFOV * 0.5 * Math.PI / 180);
+          camera.position.copy ( sceneCenter );
+          const offset = new THREE.Vector3( dist, dist * 0.5, dist );
+          camera.position.add ( offset );
+        }
+
+        resize() {
+          const canvas = this.canvas;
+          const dpr = 1.0;//window.devicePixelRatio; TODO
+          const width = canvas.width = window.innerWidth * dpr;
+          const height = canvas.height = window.innerHeight * dpr;
+
+
+          this.camera.aspect = width / height;
+          this.camera.updateProjectionMatrix();
+
+          this.view.setViewport([0, 0, width, height]);
+        }
+
+        render() {
+
+          function arrayEquals(a, b) {
+            return Array.isArray(a) &&
+                  Array.isArray(b) &&
+                  a.length === b.length &&
+                  a.every((val, index) => Math.abs(val - b[index]) < 1e-5);
+          }
+
+          this.cameraControls.update();
+          this.camera.updateMatrix();
+
+          if (!arrayEquals(this.cameraPrevMatrix, this.camera.matrix.elements)) {
+            this.spp = 0;
+            this.cameraPrevMatrix = [...this.camera.matrix.elements];
+          }
+
+          const targetSpp = 512;
+          if (this.spp < targetSpp) {
+
+            const viewMatrix = new THREE.Matrix4().set(...this.cameraPrevMatrix).transpose().invert();
+            const projMatrix = this.camera.projectionMatrix;
+
+            this.view.setCameraMatrices(viewMatrix.elements, projMatrix.elements);
+
+            this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, 0);
+            this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+
+            this.spp += 1;
+            this.renderer.draw(this.view);
+          }
+
+          window.requestAnimationFrame(this.render);
+        }
+      }
+
+      const gl = document.getElementById('canvas').getContext('webgl2');
+      if (!gl) {
+        console.log('Your browser does not support WebGL2');
+
+        let e = document.querySelector(".lds-ring");
+        e.parentNode.removeChild(e);
+
+        let label = document.querySelector(".loader-label");
+        label.innerText = "Your browser does not support WebGL2";
+
+      } else {
+        LightTracerApi().then( ( api ) => {
+
+          window.app = new App ("#canvas", api);
+
+        });
+      }
+    </script>
+  </body>
+</html>
