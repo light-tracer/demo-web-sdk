@@ -78,7 +78,7 @@
               return response.arrayBuffer();
             }).then((arrayBuffer) => {
               const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
-              const texture = this.renderer.loadTextureFromBuffer("texture_uid", buffer);
+              const texture = this.renderer.loadTextureFromBuffer("texture_uid", buffer, false);
               buffer.delete();
 
               this.api.SetEnvironmentLightShape(this.ctx, this.envLight, texture);

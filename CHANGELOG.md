@@ -1,5 +1,13 @@
 ## Updates
 
+#### 22-May-2024
+
+- Extended the API. See new samples: labels, catcher, async_shader_compilation, depth-blending.
+
+**BREAKING CHANGES**
+
+- Function `loadTextureFromBuffer` now expects additional argument: vertical flip flag. Setting it to false will keep old behaviour. 
+
 #### 28-Nov-2023
 
 - Added camera lens API to control defocus (see jewellery sample).

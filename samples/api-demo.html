@@ -67,9 +67,12 @@
           this.params = {
             modelColor:  {r: 1.0, g: 1.0, b: 1.0},
             roughness: 0.0,
+            flipTexture: true,
             position: {x: 0, y: 0, z: 0},
             DomeRadius: 0.0,
-            DomeHeight: 0.0
+            DomeHeight: 0.0,
+            gradientStart: { r: 0.0, g: 0.0, b: 0.0 },
+            gradientEnd: { r: 1.0, g: 1.0, b: 1.0 },
           };
 
           this.fpsGraph = this.ui.addBlade({
@@ -158,6 +161,8 @@
             });
           });
 
+          torusFolder.addInput(this.params, 'flipTexture');
+
           torusFolder.addButton({
             title: 'Load texture',
           }).on('click', () => {
@@ -173,7 +178,7 @@
                     return response.arrayBuffer();
                   }).then((arrayBuffer) => {
                     const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
-                    const texture = this.renderer.loadTextureFromBuffer("texture_uid", buffer);
+                    const texture = this.renderer.loadTextureFromBuffer("texture_uid", buffer, this.params.flipTexture);
                     buffer.delete();
 
                     checkError(this.api.SetNodeTexture(this.ctx, node, texture, this.api.TextureRole.BASE_COLOR_TEXTURE));
@@ -188,6 +193,7 @@
               if (object.name == "Torus") {
                 const loader = new THREE.TextureLoader();
                 loader.load ('/resources/uv_grid_opengl.jpg', (texture) => {
+                  texture.flipY = !this.params.flipTexture;
                   object.material.map = texture;
                   object.material.needsUpdate = true;
                 });
@@ -195,6 +201,30 @@
               }
             });
 
+          });
+
+          torusFolder.addButton({
+            title: 'Remove texture',
+          }).on('click', () => {
+
+            // lt
+            {
+              traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+                if (this.api.GetNodeName(this.ctx, node) == "Torus") {
+                  checkError(this.api.SetNodeTexture(this.ctx, node, { id: 0 }, this.api.TextureRole.BASE_COLOR_TEXTURE));
+                }
+              });
+              this.spp = 0;
+            }
+
+            // three.js
+            this.threeScene.traverse((object) => {
+              if (object.name == "Torus") {
+                object.material.map = null;
+                object.material.needsUpdate = true;
+                return;
+              }
+            });
           });
 
           const addMeshFolder = this.ui.addFolder({ title: 'Add mesh', expanded: true });
@@ -331,11 +361,61 @@
             this.saveImage(imageBuffer.getBytes(), 'render.png');
           });
 
+          const gradientFolder = this.ui.addFolder({ title: 'Gradient background', expanded: true });
+
+          gradientFolder.addInput(this.params, 'gradientStart', {
+            color: { type: 'float' },
+          });
+
+          gradientFolder.addInput(this.params, 'gradientEnd', {
+            color: { type: 'float' },
+          });
+
+          gradientFolder.addButton({
+            title: 'Set gradient to backplate',
+          }).on('click', () => {
+            // generate gradient image
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const context = canvas.getContext('2d');
+            const gradient = context.createLinearGradient(0, 0, 512, 512);
+            gradient.addColorStop(0, `rgb(${this.params.gradientStart.r * 255},${this.params.gradientStart.g * 255},${this.params.gradientStart.b * 255})`);
+            gradient.addColorStop(1, `rgb(${this.params.gradientEnd.r * 255},${this.params.gradientEnd.g * 255},${this.params.gradientEnd.b * 255})`);
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, 512, 512);
+
+            // set backplate image
+            fetch(canvas.toDataURL()).then((response) => {
+              if (!response.ok) {
+                throw new Error();
+              }
+              return response.arrayBuffer();
+            }).then((arrayBuffer) => {
+              const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+              const texture = this.renderer.loadTextureFromBuffer("backplate_gradient"+Math.random(), buffer, false);
+              buffer.delete();
+
+              this.api.SetBackplateType(this.ctx, this.api.BackplateType.IMAGE);
+              this.api.SetBackplateImage(this.ctx, texture);
+            });
+          });
+
           const debugFolder = this.ui.addFolder({ title: 'Debug', expanded: false });
           debugFolder.addButton({
             title: 'Draw node tree',
           }).on('click', () => {
             this.drawNodeTree();
+          });
+
+          debugFolder.addButton({
+            title: 'Shutdown LT',
+          }).on('click', () => {
+            this.ui.dispose();
+            window.removeEventListener('resize', this.resize);
+            window.cancelAnimationFrame(this.animRequest);
+            window.app = null;
+            this.canvas.parentNode.removeChild(this.canvas);
           });
 
           debugFolder.addButton({
@@ -409,7 +489,7 @@
           this.resize = this.resize.bind(this);
 
           window.addEventListener('resize', this.resize);
-          window.requestAnimationFrame(this.render);
+          this.animRequest = window.requestAnimationFrame(this.render);
         }
 
         exportToGLB( input, callback ) {
@@ -542,7 +622,7 @@
 
           this.fpsGraph.end();
 
-          window.requestAnimationFrame(this.render);
+          this.animRequest = window.requestAnimationFrame(this.render);
         }
 
         drawNodeTree() {

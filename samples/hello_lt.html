@@ -52,7 +52,7 @@
 
           this.spp = 0;
           this.justLoadedScene = false;
-          this.readyToRender = false;
+          this.haveDumpedProfilingInfo = false;
 
           this.ctx = this.renderer.getContextHandle();
 
@@ -98,6 +98,8 @@
             this.renderer.loadEnvironmentMapFromBuffer(buffer);
             buffer.delete();
           }
+
+          this.justLoadedScene = true;
 
           // Fit camera to scene
           const camera = this.camera = new THREE.PerspectiveCamera( this.cameraFOV, window.innerWidth / window.innerHeight, 0.1, 10000 );
@@ -158,7 +160,21 @@
             this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
 
             this.spp += 1;
+
+            if (this.justLoadedScene)  {
+              console.time('firstRender')
+            }
             this.renderer.draw(this.view);
+            if (this.justLoadedScene)  {
+              console.timeEnd('firstRender')
+            }
+
+            if (!this.haveDumpedProfilingInfo && this.justLoadedScene) {
+              this.renderer.printProfilingInfo();
+              this.haveDumpedProfilingInfo = true;
+            }
+
+            this.justLoadedScene = false;
           }
 
           window.requestAnimationFrame(this.render);

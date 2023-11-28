@@ -12,6 +12,8 @@
   <body>
     <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
 
+    <script src="/tweakpane/tweakpane.min.js"></script>
+
     <script type="module">
 
       import { default as LightTracerApi } from "/ltapi.js";
@@ -52,6 +54,68 @@
           this.cameraFOV = 20;
 
           console.log("LT viewer version: " + this.api.Version());
+
+          this.ui = new Tweakpane.Pane();
+
+          this.params = {
+            catcherType: 'glossy',
+            roughness: 0.3,
+          };
+
+          const checkError = (status) => {
+            if (status.value != this.api.ErrorType.SUCCESS.value) {
+              console.log(status);
+              console.log("ERROR");
+            }
+          };
+
+          const checkValid = (obj) => {
+            if (obj.id == 0) {
+              console.log("ERROR INVALID HANDLE");
+            }
+          };
+
+          const traverseSceneLT = (node, callback) => {
+
+            for (let subIdx = 0; subIdx < this.api.GetSubNodeCount(this.ctx, node); ++subIdx) {
+              let sub = this.api.GetSubNode(this.ctx, node, subIdx);
+              checkValid(sub);
+
+              callback(sub);
+
+              traverseSceneLT(sub, callback);
+            }
+          };
+
+          this.ui.addInput(this.params, 'catcherType', {
+            options: {
+              shadow: 'shadow',
+              glossy: 'glossy',
+          }}).on('change', () => {
+            traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+              let mode = this.api.MaterialType.SHADOW_CATCHER;
+              if (this.params.catcherType == 'glossy') {
+                mode = this.api.MaterialType.GLOSSY_CATCHER;
+              }
+              if (this.api.GetNodeName(this.ctx, node) == "Catcher plane") {
+                this.api.SetNodeMaterialType(this.ctx, node, mode);
+              }
+            });
+            this.spp = 0;
+          });
+
+          this.ui.addInput(this.params, 'roughness', { min: 0.0, max: 1.0}).on('change', () => {
+              const roughness = this.params.roughness;
+
+              traverseSceneLT(this.api.GetSceneRootNode(this.ctx), (node) => {
+              if (this.api.GetNodeName(this.ctx, node) == "Catcher plane") {
+                checkError(this.api.SetNodeMaterialValue(this.ctx, node, this.api.MaterialProperty.ROUGHNESS, roughness));
+              }
+            });
+            this.spp = 0;
+          });
+
+
 
           let gl = this.gl = this.canvas.getContext('webgl2');
 
@@ -134,22 +198,21 @@
             const torusNode = this.renderer.loadSceneFromBuffer(sceneDataBuffer);
             sceneDataBuffer.delete();
 
-            let geometry = new THREE.PlaneGeometry( 100, 100 );
+            fitCameraToScene();
+
+            let geometry = new THREE.PlaneGeometry( 400, 400 );
             let material = new THREE.MeshStandardMaterial( {
-              color: 0xffaaff,
-              metalness: 1.0,
-              roughness: 0.1,
+              roughness: 0.3,
             });
 
             let mesh = new THREE.Mesh( geometry, material );
-            mesh.name = "New mesh";
+            mesh.name = "Catcher plane";
 
             this.exportToGLB( mesh, (buffer) => {
               const ltBuffer = this.createBuffer(new Uint8Array(buffer));
               const node = this.renderer.loadSceneFromBuffer(ltBuffer);
               ltBuffer.delete();
               
-              fitCameraToScene();
 
               const meshNode = this.api.GetSubNode(this.ctx, node, 0);
 
@@ -157,39 +220,16 @@
               m.multiply ((new THREE.Matrix4()).makeTranslation(0, -32.5, 0));
               m.multiply ((new THREE.Matrix4()).makeRotationX(-Math.PI * 0.5));
               this.api.SetNodeLocalTransform(this.ctx, node, m.elements);
+              this.api.SetNodeMaterialType(this.ctx, meshNode, this.api.MaterialType.GLOSSY_CATCHER);
 
-              fetch('/resources/opacity.jpeg').then((response) => {
-                if (!response.ok) {
-                  throw new Error(name);
-                }
-                return response.arrayBuffer();
-              }).then((arrayBuffer) => {
-                const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
-                const texture = this.renderer.loadTextureFromBuffer("opacity.jpeg", buffer, false);
-                buffer.delete();
-
-                this.api.SetNodeTexture(this.ctx, meshNode, texture, this.api.TextureRole.EXT_OPACITY_TEXTURE);
-              });
+              // this.api.SetNodeTexture(this.ctx, meshNode, texture, this.api.TextureRole.EXT_OPACITY_TEXTURE);
             });
-          });
-
-          fetch('/resources/uv_grid_opengl.jpg').then((response) => {
-            if (!response.ok) {
-              throw new Error(name);
-            }
-            return response.arrayBuffer();
-          }).then((arrayBuffer) => {
-            const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
-            const texture = this.renderer.loadTextureFromBuffer("uv_grid_opengl.jpg", buffer, false);
-            buffer.delete();
-
-            this.api.SetBackplateImage(this.ctx, texture);
           });
         }
 
         resize() {
           const canvas = this.canvas;
-          const dpr = 1.0;//window.devicePixelRatio; TODO
+          const dpr = 1.0;
           const width = canvas.width = window.innerWidth * dpr;
           const height = canvas.height = window.innerHeight * dpr;
 
@@ -211,9 +251,6 @@
 
           this.cameraControls.update();
           this.camera.updateMatrix();
-
-          this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, 0);
-          this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
 
           if (!arrayEquals(this.cameraPrevMatrix, this.camera.matrix.elements)) {
             this.spp = 0;

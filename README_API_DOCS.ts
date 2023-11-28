@@ -30,8 +30,9 @@ class BackplateType {
 
 class MaterialType {
   STANDARD_PBR : number = 0;     // Physically based material, using metallic-roughness workflow
-  GLASS_MATERIAL : number = 2;   // Glass material allowing refraction, roughness and light dispersion
-  SHADOW_CATCHER : number = 3;   // Dedicated material type for shadow/glossy catcher
+  GLASS_MATERIAL : number = 1;   // Glass material allowing refraction, roughness and light dispersion
+  SHADOW_CATCHER : number = 2;   // Dedicated material type for shadow catcher
+  GLOSSY_CATCHER : number = 3;   // Dedicated material type for glossy catcher
 }
 
 class MaterialPropertyColor {
@@ -148,6 +149,9 @@ class LightEnvType {
 
 declare class ApiObject {
 
+  //! Returns underlaying WebGL texture interface by emscripten texture handle.
+  GetTextureById: (handle: number) => WebGLTexture;
+
   //! Sets named parameter for the renderer.
   SetParam: (context: ContextType, name: string, value: number) => ErrorType
 
@@ -176,6 +180,15 @@ declare class ApiObject {
     // SensorHeight
     // AutoFocusOnCenter
     // AutoFocalLength
+
+  // Environment map:
+    // MapPowerScale
+    // SkyDomeEnabled
+    // DomeRadius
+    // DomeHeight
+    // MapRotationX
+    // MapRotationY
+    // MapRotationZ
 
   // Advanced rendering settings:
     // RayOffsetFactor
@@ -345,6 +358,30 @@ declare class ApiObject {
 
   //! Returns lens model used by the camera.
   GetCameraLensModel: (context: ContextType) => LensModel;
+
+  //! Creates a new node with label attached.
+  CreateLabelNode: (context: ContextType, name: string, parentNode: NodeType) => NodeType;
+
+  //! Sets named parameter value for a label attached to the given node.
+  //! Possible parameter names:
+    // LabelType         -- 0: planar, 1: spherical, 2: cylindrical
+    // Curvature
+    // Depth
+    // SizeX
+    // SizeY
+  SetLabelParam: (context: ContextType, labelNode: NodeType, name: string, value: number) => ErrorType;
+
+  //! Rwturns named parameter value for a label attached to the given node.
+  GetLabelParam: (context: ContextType, labelNode: NodeType, name: string, value: number) => ErrorType;
+
+  //! Enables use of tiled rendering to increase app responsiveness.
+  SetTilesEnabled: (context: ContextType, enabled: boolean) => ErrorType;
+
+  //! Sets up tile subdivision.
+  //! Valid grid dimensions are in range [1, 4].
+  //! Actual tile count is (gridDimension * gridDimension).
+  //! With `autoTiles` flag the engine will try to adjust tile count automatically, gridDimension is ignored.
+  SetTileGrid: (context: ContextType, gridDimension: number, autoTiles: boolean) => ErrorType;
 }
 
 declare class View {
@@ -365,13 +402,16 @@ declare class Renderer {
   loadEnvironmentMapFromBuffer: (buffer: BufferDescriptor) => void;
 
   //! Decodes the texture provided with a file buffer and returns texture handle.
-  loadTextureFromBuffer: (id: string, buffer: BufferDescriptor) => TextureType;
+  loadTextureFromBuffer: (id: string, buffer: BufferDescriptor, flipY: boolean) => TextureType;
 
   //! Adds IES profile as a texture to the scene.
   loadIesProfileFromBuffer: (id: string, buffer: BufferDescriptor) => TextureType;
 
   //! Loads GLTF scene from buffer and returns root node handle.
   loadSceneFromBuffer: (buffer: BufferDescriptor) => NodeType;
+
+  //! Loads GLTF scene from buffer and returns root node handle.
+  loadSceneFromBufferWithSettings: (buffer: BufferDescriptor, settingsJson: string) => NodeType;
 
   //! Forces engine to reset frame accumulation and start rendering from scratch.
   //! Usually it is not needed to call this since the engine tracks changes of data and settings.
@@ -388,4 +428,15 @@ declare class Renderer {
 
   //! Destroys view object
   destroyView: (view: View) => void;
+
+  //! Returns emscripten texure handle for last rendered HDR color buffer.
+  //! Warning: does not work in demo SDK
+  getHdrBufferId: () => number;
+
+  //! Returns emscripten texure handle for last rendered geometry buffer.
+  //! Warning: does not work in demo SDK
+  getGeomBufferId: () => number;
+
+  //! Prints profiling timings since the creation of Renderer object.
+  printProfilingInfo: () => void
 }

@@ -100,15 +100,15 @@
             buffer.delete();
           }
 
-          let geometry = new THREE.TorusKnotGeometry( 18, 7, 300, 40 );
+          let geometry = new THREE.PlaneGeometry( 100, 100 );
           let material = new THREE.MeshStandardMaterial( {
-            color: 0xffffff,
-            metalness: 0.0,
-            roughness: 0.0
-          } );
+            color: 0xffaaff,
+            metalness: 1.0,
+            roughness: 0.1,
+          });
 
-          let torusMesh = new THREE.Mesh( geometry, material );
-          torusMesh.name = "Torus";
+          let mesh = new THREE.Mesh( geometry, material );
+          mesh.name = "Plane";
 
           const camera = this.camera = new THREE.PerspectiveCamera( this.cameraFOV, window.innerWidth / window.innerHeight, 0.1, 10000 );
           this.cameraPrevMatrix = [...this.camera.matrix.elements];
@@ -129,61 +129,45 @@
           };
    
 
-          this.exportToGLB( torusMesh, (buffer) => {
+          this.exportToGLB( mesh, (buffer) => {
             const sceneDataBuffer = this.createBuffer(new Uint8Array(buffer));
-            const torusNode = this.renderer.loadSceneFromBuffer(sceneDataBuffer);
+            const node = this.renderer.loadSceneFromBuffer(sceneDataBuffer);
             sceneDataBuffer.delete();
 
-            let geometry = new THREE.PlaneGeometry( 100, 100 );
-            let material = new THREE.MeshStandardMaterial( {
-              color: 0xffaaff,
-              metalness: 1.0,
-              roughness: 0.1,
-            });
-
-            let mesh = new THREE.Mesh( geometry, material );
-            mesh.name = "New mesh";
-
-            this.exportToGLB( mesh, (buffer) => {
-              const ltBuffer = this.createBuffer(new Uint8Array(buffer));
-              const node = this.renderer.loadSceneFromBuffer(ltBuffer);
-              ltBuffer.delete();
-              
-              fitCameraToScene();
-
-              const meshNode = this.api.GetSubNode(this.ctx, node, 0);
-
+            {
               const m = new THREE.Matrix4();
-              m.multiply ((new THREE.Matrix4()).makeTranslation(0, -32.5, 0));
               m.multiply ((new THREE.Matrix4()).makeRotationX(-Math.PI * 0.5));
               this.api.SetNodeLocalTransform(this.ctx, node, m.elements);
-
-              fetch('/resources/opacity.jpeg').then((response) => {
-                if (!response.ok) {
-                  throw new Error(name);
-                }
-                return response.arrayBuffer();
-              }).then((arrayBuffer) => {
-                const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
-                const texture = this.renderer.loadTextureFromBuffer("opacity.jpeg", buffer, false);
-                buffer.delete();
-
-                this.api.SetNodeTexture(this.ctx, meshNode, texture, this.api.TextureRole.EXT_OPACITY_TEXTURE);
-              });
-            });
-          });
-
-          fetch('/resources/uv_grid_opengl.jpg').then((response) => {
-            if (!response.ok) {
-              throw new Error(name);
             }
-            return response.arrayBuffer();
-          }).then((arrayBuffer) => {
-            const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
-            const texture = this.renderer.loadTextureFromBuffer("uv_grid_opengl.jpg", buffer, false);
-            buffer.delete();
+            
+            fitCameraToScene();
 
-            this.api.SetBackplateImage(this.ctx, texture);
+            let labelNode = this.api.CreateLabelNode(this.ctx, 'Square label', node);
+            this.api.SetNodeMaterialColor(this.ctx, labelNode, this.api.MaterialPropertyColor.BASE_COLOR, [1, 1, 1]);
+            this.api.SetNodeMaterialValue(this.ctx, labelNode, this.api.MaterialProperty.METALNESS, 0.0);
+            this.api.SetNodeMaterialValue(this.ctx, labelNode, this.api.MaterialProperty.OPACITY, 1.0);
+            this.api.SetLabelParam(this.ctx, labelNode, 'SizeX', 40.0);
+            this.api.SetLabelParam(this.ctx, labelNode, 'SizeY', 40.0);
+            this.api.SetLabelParam(this.ctx, labelNode, 'Depth', 10.0);
+
+            {
+              const m = new THREE.Matrix4();
+              m.multiply ((new THREE.Matrix4()).makeTranslation(0, 0, 5.0));
+              this.api.SetNodeLocalTransform(this.ctx, labelNode, m.elements);
+            }
+
+            fetch('/resources/synthetic_soft_round_half.png').then((response) => {
+              if (!response.ok) {
+                throw new Error(name);
+              }
+              return response.arrayBuffer();
+            }).then((arrayBuffer) => {
+              const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+              const texture = this.renderer.loadTextureFromBuffer("synthetic_soft_round_half.png", buffer, false);
+              buffer.delete();
+
+              this.api.SetNodeTexture(this.ctx, labelNode, texture, this.api.TextureRole.EXT_OPACITY_TEXTURE);
+            });
           });
         }
 

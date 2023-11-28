@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>LT API demo</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no"
+    />
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #40515f;
+      }
+      canvas {
+        touch-action: none;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+
+    <script src="/tweakpane/tweakpane.min.js"></script>
+    <script src="/tweakpane/tweakpane-plugin-essentials-0.1.8.min.js"></script>
+
+    <script type="module">
+      import { default as LightTracerApi } from "/ltapi.js";
+
+      import * as THREE from "/three/three.module.js";
+      import { OrbitControls } from "/three/OrbitControls.js";
+      import { TransformControls } from "/three/TransformControls.js";
+      import { GLTFExporter } from "/three/GLTFExporter.js";
+      import { EXRLoader } from "/three/EXRLoader.js";
+
+      let scene2;
+      class App {
+        initShaderProgram(gl, vsSource, fsSource) {
+          const vertexShader = this.loadShader(gl, gl.VERTEX_SHADER, vsSource);
+          const fragmentShader = this.loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+          const shaderProgram = gl.createProgram();
+          gl.attachShader(shaderProgram, vertexShader);
+          gl.attachShader(shaderProgram, fragmentShader);
+          gl.linkProgram(shaderProgram);
+          return shaderProgram;
+        }
+
+        loadShader(gl, type, source) {
+          const shader = gl.createShader(type);
+          gl.shaderSource(shader, source);
+          gl.compileShader(shader);
+
+          if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.log('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+          }
+
+          return shader;
+        }
+
+        createBuffer(typedarray) {
+          console.assert(typedarray.buffer instanceof ArrayBuffer);
+          console.assert(typedarray.byteLength > 0);
+          if (this.api.HEAPU32.buffer == typedarray.buffer) {
+            typedarray = new Uint8Array(typedarray);
+          }
+          const ta = typedarray;
+          const bd = new this.api.internal$BufferDescriptor(ta.byteLength);
+          const uint8array = new Uint8Array(
+            ta.buffer,
+            ta.byteOffset,
+            ta.byteLength
+          );
+          bd.getBytes().set(uint8array);
+          return bd;
+        }
+
+        constructor(canvasSelector, api) {
+          this.canvas = document.querySelector(canvasSelector);
+          this.api = api;
+          this.cameraFOV = 60;
+          this.useLT = false;
+
+          this.ui = new Tweakpane.Pane();
+          this.ui.registerPlugin(TweakpaneEssentialsPlugin);
+
+          this.params = {
+            enableTiles: false,
+            autoTiles: true,
+            gridDimension: 2,
+          };
+
+          this.fpsGraph = this.ui.addBlade({
+            view: "fpsgraph",
+
+            label: "FPS",
+            lineCount: 2,
+          });
+
+          this.ui
+            .addButton({
+              title: "Enable LT",
+            })
+            .on("click", () => {
+              this.useLT = !this.useLT;
+            });
+
+          const tilesFolder = this.ui.addFolder({ title: 'Tiles', expanded: true });
+
+          tilesFolder
+            .addInput(this.params, 'enableTiles', {
+              label: "Enable tiles",
+            })
+            .on("change", () => {
+              this.api.SetTilesEnabled(this.ctx, this.params.enableTiles);
+            });
+
+          tilesFolder
+            .addInput(this.params, 'autoTiles', {
+              label: "Auto tiles",
+            })
+            .on("change", () => {
+              this.api.SetTileGrid(this.ctx, this.params.gridDimension, this.params.autoTiles);
+            });
+
+          tilesFolder
+            .addInput(this.params, 'gridDimension', {
+              label: "Tile grid",
+              min: 1,
+              max: 4,
+              step: 1
+            })
+            .on("change", () => {
+              this.api.SetTileGrid(this.ctx, this.params.gridDimension, this.params.autoTiles);
+            });
+
+          const checkError = (status) => {
+            if (status.value != this.api.ErrorType.SUCCESS.value) {
+              console.log(status);
+              console.log("ERROR");
+            }
+          };
+
+          this.progressBar = document.querySelector("#renderProgressBar");
+
+          console.log("LT viewer version: " + this.api.Version());
+
+          let gl = this.gl = (this.gl = this.canvas.getContext("webgl2"));
+
+          // Request extensions
+          let floatLinearExt = gl.getExtension("OES_texture_float_linear");
+          gl.getExtension("EXT_color_buffer_float");
+
+          this.renderer = new this.api.Renderer(
+            canvasSelector,
+            "LT_APP_TOKEN"
+          );
+          this.renderer.setFloatTextureInterpolationSupport(
+            floatLinearExt !== null
+          );
+
+          // Setup screen trg
+          {
+            this.tools = {};
+
+            const vao = this.tools.vao = gl.createVertexArray();
+            gl.bindVertexArray(vao);
+
+            const vsSource = `#version 300 es
+              in vec4 aVertexPosition;
+              out vec2 vTextureCoord;
+              void main(void) {
+                vTextureCoord = aVertexPosition.xy * 0.5 + 0.5;
+                gl_Position = vec4(aVertexPosition.xy, 0.0, 1.0);
+              }
+            `;
+
+            const fsSource = `#version 300 es
+              precision highp float;
+              in vec2 vTextureCoord;
+              uniform sampler2D uSamplerColor;
+              uniform sampler2D uSamplerGeom;
+              uniform mat4 uProjection;
+              uniform mat4 uImageToCamera;
+              out vec4 outColor;
+
+              const mat3 AP1toSRGB = mat3
+              (
+                  1.70485868, -0.62171602, -0.08329937,
+                  -0.13007682,  1.14073577, -0.01055980,
+                  -0.02396407, -0.12897551,  1.15301402
+              );
+
+              vec4 LinearTosRGB( in vec4 value ) {
+                  return vec4( mix( pow( value.rgb, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ), value.rgb * 12.92, vec3( lessThanEqual( value.rgb, vec3( 0.0031308 ) ) ) ), value.a );
+              }
+
+              #define saturate( a ) clamp( a, 0.0, 1.0 )
+
+              vec3 RRTAndODTFit( vec3 v ) {
+                  vec3 a = v * ( v + 0.0245786 ) - 0.000090537;
+                  vec3 b = v * ( 0.983729 * v + 0.4329510 ) + 0.238081;
+                  return a / b;
+              }
+
+              vec3 ACESFilmicToneMapping( vec3 color ) {
+                  const mat3 ACESInputMat = mat3(
+                  vec3( 0.59719, 0.07600, 0.02840 ), vec3( 0.35458, 0.90834, 0.13383 ), vec3( 0.04823, 0.01566, 0.83777 )
+                  );
+                  const mat3 ACESOutputMat = mat3(
+                  vec3(  1.60475, -0.10208, -0.00327 ), vec3( -0.53108, 1.10813, -0.07276 ), vec3( -0.07367, -0.00605, 1.07602 )
+                  );
+                  float toneMappingExposure = 1.0;
+                  color *= toneMappingExposure / 0.6;
+                  color = ACESInputMat * color;
+                  color = RRTAndODTFit( color );
+                  color = ACESOutputMat * color;
+                  return saturate( color );
+              }
+
+              void main(void) {
+                // Compute depth compatible with WebGL
+                {
+                  float rayTime = texture (uSamplerGeom, vTextureCoord).z;
+                  vec3 rayDirect = normalize (vec3 (inverse (uProjection) * vec4 (vTextureCoord * 2.0 - vec2 (1.0), 0.0, 1.0)));
+                  vec3 posCamera = rayDirect * rayTime;
+                  vec4 posNDC = uProjection * vec4 (posCamera, 1.0);
+                  posNDC /= posNDC.w;
+
+                  gl_FragDepth = posNDC.z * 0.5 + 0.5;
+                }
+
+                // HDR color in ACES-cg space
+                outColor = texture (uSamplerColor, vTextureCoord);
+
+                // To SRGB
+                outColor.rgb = outColor.rgb * AP1toSRGB;
+
+                // Tone mapping
+                outColor.rgb = ACESFilmicToneMapping (outColor.rgb);
+
+                // Gamma
+                outColor = LinearTosRGB (outColor);
+              }
+            `;
+
+            const shaderProgram = this.tools.shaderProgram = this.initShaderProgram(gl, vsSource, fsSource);
+
+            const positionBuffer = this.tools.buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            const vertices = [
+                -1.0, -1.0,
+                 3.0, -1.0,
+                -1.0,  3.0,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+          }
+
+          this.spp = 0;
+          this.justLoadedScene = false;
+          this.readyToRender = false;
+
+          this.ctx = this.renderer.getContextHandle();
+
+          this.api.SetBackplateType(this.ctx, this.api.BackplateType.TRANSPARENT);
+
+          // Must be created after Renderer constructor
+          this.threeRenderer = new THREE.WebGLRenderer({ canvas: canvas });
+          this.threeRenderer.useLegacyLights = false;
+          this.threeRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+          this.threeRenderer.autoClear = false;
+
+
+          this.setupScene(this.canvas);
+
+          this.view = this.renderer.createView();
+          this.resize();
+
+          this.render = this.render.bind(this);
+          this.resize = this.resize.bind(this);
+
+          window.addEventListener("resize", this.resize);
+          window.requestAnimationFrame(this.render);
+        }
+        exportToGLB(input, callback) {
+          new GLTFExporter().parse(
+            input,
+            (result) => callback(result),
+            function (error) {
+              console.log("An error happened during parsing", error);
+            },
+            { binary: true }
+          );
+        }
+
+        setupScene(canvas) {
+          const sceneBg = (this.threeSceneBg = new THREE.Scene());
+          const scene = (this.threeScene = new THREE.Scene());
+          const sceneNew = (this.scene2 = new THREE.Scene());
+          const camera = (this.camera = new THREE.PerspectiveCamera(
+            this.cameraFOV,
+            window.innerWidth / window.innerHeight,
+            10,
+            1000
+          ));
+          this.cameraPrevMatrix = [...this.camera.matrix.elements];
+
+          camera.position.set(0, 0, 120);
+
+          const renderer = this.threeRenderer;
+
+          let geometry = new THREE.TorusKnotGeometry(18, 7, 300, 40);
+          let material = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            metalness: 0.0,
+            roughness: 0.0,
+          });
+
+          let torusMesh = new THREE.Mesh(geometry, material);
+          torusMesh.name = "Torus";
+          scene.add(torusMesh);
+
+          const _geom1 = new THREE.PlaneGeometry(120, 80);
+          const _mat1 = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+          const planeMesh1 = new THREE.Mesh(_geom1, _mat1);
+          planeMesh1.rotation.x = 5;
+          this.scene2.add(planeMesh1);
+
+          // {
+          //   const loader = new THREE.TextureLoader();
+          //   loader.load ('leaf.png', (texture) => {
+          //     _mat1.map = texture;
+          //     _mat1.needsUpdate = true;
+          //   });
+          // }
+
+          const pmremGenerator = new THREE.PMREMGenerator(renderer);
+          pmremGenerator.compileEquirectangularShader();
+
+          new EXRLoader().load("/resources/piz_compressed.exr", (texture) => {
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+
+            this.envMap = pmremGenerator.fromEquirectangular(texture).texture;
+            torusMesh.material.envMap = this.envMap;
+            torusMesh.material.needsUpdate = true;
+            sceneBg.background = texture;
+          });
+
+          this.exportToGLB(torusMesh, (buffer) => {
+            const sceneDataBuffer = this.createBuffer(new Uint8Array(buffer));
+
+            this.renderer.loadSceneFromBuffer(sceneDataBuffer);
+            sceneDataBuffer.delete();
+          });
+
+          // Load env map to LT
+          fetch("/resources/piz_compressed.exr")
+            .then(function (response) {
+              if (!response.ok) {
+                throw new Error(name);
+              }
+              return response.arrayBuffer();
+            })
+            .then((arrayBuffer) => {
+              const buffer = this.createBuffer(new Uint8Array(arrayBuffer));
+              this.renderer.loadEnvironmentMapFromBuffer(buffer);
+              buffer.delete();
+            });
+
+          const controls = (this.cameraControls = new OrbitControls(
+            camera,
+            renderer.domElement
+          ));
+        }
+
+        blendImageLT() {
+          const hdrTex = this.api.GetTextureById(this.renderer.getHdrBufferId());
+          const geomTex = this.api.GetTextureById(this.renderer.getGeomBufferId());
+
+          const projectionMatrix = this.camera.projectionMatrix;
+          const imageToCameraMatrix = projectionMatrix.clone().invert();
+
+          const gl = this.gl;
+
+          gl.frontFace(gl.CCW);
+          gl.bindVertexArray(this.tools.vao);
+
+          gl.useProgram(this.tools.shaderProgram);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.tools.buffer);
+
+          const attrIdx = gl.getAttribLocation(this.tools.shaderProgram, 'aVertexPosition');
+
+          gl.enableVertexAttribArray(attrIdx);
+          gl.vertexAttribPointer(attrIdx, 2, gl.FLOAT, false, 0, 0);
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, hdrTex);
+          gl.uniform1i(gl.getUniformLocation(this.tools.shaderProgram, 'uSamplerColor'), 0);
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, geomTex);
+          gl.uniform1i(gl.getUniformLocation(this.tools.shaderProgram, 'uSamplerGeom'), 1);
+
+          gl.uniformMatrix4fv(gl.getUniformLocation(this.tools.shaderProgram, 'uProjection'), false, projectionMatrix.elements);
+          gl.uniformMatrix4fv(gl.getUniformLocation(this.tools.shaderProgram, 'uImageToCamera'), false, imageToCameraMatrix.elements);
+
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+          this.threeRenderer.resetState();
+        }
+
+        resize() {
+          const canvas = this.canvas;
+          const dpr = 1.0; //window.devicePixelRatio; TODO
+          const width = (canvas.width = window.innerWidth * dpr);
+          const height = (canvas.height = window.innerHeight * dpr);
+
+          this.camera.aspect = width / height;
+          this.camera.updateProjectionMatrix();
+          this.threeRenderer.setSize(width, height);
+
+          this.view.setViewport([0, 0, width, height]);
+        }
+
+        render() {
+          function arrayEquals(a, b) {
+            return (
+              Array.isArray(a) &&
+              Array.isArray(b) &&
+              a.length === b.length &&
+              a.every((val, index) => Math.abs(val - b[index]) < 1e-5)
+            );
+          }
+
+          this.fpsGraph.begin();
+
+          this.cameraControls.update();
+          this.camera.updateMatrix();
+
+          if (this.useLT) {
+            if (
+              !arrayEquals(this.cameraPrevMatrix, this.camera.matrix.elements)
+            ) {
+              this.spp = 0;
+              this.cameraPrevMatrix = [...this.camera.matrix.elements];
+            }
+
+            const targetSpp = 512;
+            if (this.spp < targetSpp) {
+              const viewMatrix = new THREE.Matrix4()
+                .set(...this.cameraPrevMatrix)
+                .transpose()
+                .invert();
+              const projMatrix = this.camera.projectionMatrix;
+
+              this.view.setCameraMatrices(
+                viewMatrix.elements,
+                projMatrix.elements
+              );
+
+              this.spp += 1;
+              this.renderer.draw(this.view); // Actual raytracing still happening here, but we discard the output with LT tone mapping
+              this.threeRenderer.resetState();
+              this.threeRenderer.clear();
+              this.threeRenderer.render(this.threeSceneBg, this.camera);
+              this.blendImageLT(); // Raytraced image will be blended-in here
+              this.threeRenderer.render(this.scene2, this.camera);
+              
+            }
+          } else {
+            this.threeRenderer.resetState();
+            this.threeRenderer.clear();
+            this.threeRenderer.render(this.threeSceneBg, this.camera);
+            this.threeRenderer.render(this.threeScene, this.camera);
+            this.threeRenderer.render(this.scene2, this.camera);
+          }
+
+          this.fpsGraph.end();
+
+          window.requestAnimationFrame(this.render);
+        }
+      }
+
+      const gl = document.getElementById("canvas").getContext("webgl2");
+      if (!gl) {
+        console.log("Your browser does not support WebGL2");
+
+        let e = document.querySelector(".lds-ring");
+        e.parentNode.removeChild(e);
+
+        let label = document.querySelector(".loader-label");
+        label.innerText = "Your browser does not support WebGL2";
+      } else {
+        LightTracerApi().then((api) => {
+          window.app = new App("#canvas", api);
+        });
+      }
+    </script>
+  </body>
+</html>

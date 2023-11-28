@@ -4,7 +4,7 @@ Create photo-real interactive 3D visuals right inside the web browser https://li
 
 Light Tracer Render is a **client-side** rendering solution. This means that rendering occurs on the **user's machine**, and the rendering speed depends on the specific GPU installed.
 
-[**See what's new**](CHANGELOG.md) (**28-Nov-2023** exposed more LT abilities with JS API)
+[**See what's new**](CHANGELOG.md) (**22-May-2024** exposed more LT abilities with JS API)
 
 ## Getting started
 
